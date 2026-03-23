@@ -61,17 +61,18 @@ func AggregateResourceBindingWorkStatus(
 	binding *workv1alpha2.ResourceBinding,
 	eventRecorder record.EventRecorder,
 ) error {
-	workList, err := GetWorksByBindingID(ctx, c, binding.Labels[workv1alpha2.ResourceBindingPermanentIDLabel], true)
-	if err != nil {
-		return err
-	}
-	aggregatedStatuses, err := assembleWorkStatus(workList.Items, binding.Spec.Resource)
-	if err != nil {
-		return err
-	}
-
 	var operationResult controllerutil.OperationResult
-	if err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	bindingID := binding.Labels[workv1alpha2.ResourceBindingPermanentIDLabel]
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		workList, err := GetWorksByBindingID(ctx, c, bindingID, true)
+		if err != nil {
+			return err
+		}
+		aggregatedStatuses, err := assembleWorkStatus(workList.Items, binding.Spec.Resource)
+		if err != nil {
+			return err
+		}
+
 		operationResult, err = UpdateStatus(ctx, c, binding, func() error {
 			binding.Status.AggregatedStatus = aggregatedStatuses
 			// set binding status with the newest condition
@@ -79,7 +80,8 @@ func AggregateResourceBindingWorkStatus(
 			return nil
 		})
 		return err
-	}); err != nil {
+	})
+	if err != nil {
 		eventRecorder.Event(binding, corev1.EventTypeWarning, events.EventReasonAggregateStatusFailed, err.Error())
 		return err
 	}
@@ -101,17 +103,18 @@ func AggregateClusterResourceBindingWorkStatus(
 	binding *workv1alpha2.ClusterResourceBinding,
 	eventRecorder record.EventRecorder,
 ) error {
-	workList, err := GetWorksByBindingID(ctx, c, binding.Labels[workv1alpha2.ClusterResourceBindingPermanentIDLabel], false)
-	if err != nil {
-		return err
-	}
-	aggregatedStatuses, err := assembleWorkStatus(workList.Items, binding.Spec.Resource)
-	if err != nil {
-		return err
-	}
-
 	var operationResult controllerutil.OperationResult
-	if err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	bindingID := binding.Labels[workv1alpha2.ClusterResourceBindingPermanentIDLabel]
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		workList, err := GetWorksByBindingID(ctx, c, bindingID, false)
+		if err != nil {
+			return err
+		}
+		aggregatedStatuses, err := assembleWorkStatus(workList.Items, binding.Spec.Resource)
+		if err != nil {
+			return err
+		}
+
 		operationResult, err = UpdateStatus(ctx, c, binding, func() error {
 			binding.Status.AggregatedStatus = aggregatedStatuses
 			// set binding status with the newest condition
@@ -119,7 +122,8 @@ func AggregateClusterResourceBindingWorkStatus(
 			return nil
 		})
 		return err
-	}); err != nil {
+	})
+	if err != nil {
 		eventRecorder.Event(binding, corev1.EventTypeWarning, events.EventReasonAggregateStatusFailed, err.Error())
 		return err
 	}

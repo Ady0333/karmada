@@ -25,14 +25,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	workv1alpha1 "github.com/karmada-io/karmada/pkg/apis/work/v1alpha1"
 	workv1alpha2 "github.com/karmada-io/karmada/pkg/apis/work/v1alpha2"
@@ -962,9 +965,65 @@ func TestIsResourceApplied(t *testing.T) {
 	assert.True(t, IsResourceApplied(workStatus))
 }
 
-// Helper Functions
+func TestAggregateResourceBindingWorkStatus_StaleStatusOnRetry(t *testing.T) {
+	const bindingID = "test-id"
+	binding := &workv1alpha2.ResourceBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default", Name: "rb",
+			Labels: map[string]string{workv1alpha2.ResourceBindingPermanentIDLabel: bindingID},
+		},
+		Spec: workv1alpha2.ResourceBindingSpec{
+			Resource: workv1alpha2.ObjectReference{APIVersion: "apps/v1", Kind: "Deployment", Name: "deploy", Namespace: "default"},
+		},
+	}
+	work := &workv1alpha1.Work{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "karmada-es-member1", Name: "work-1",
+			Labels: map[string]string{workv1alpha2.ResourceBindingPermanentIDLabel: bindingID},
+		},
+		Spec: workv1alpha1.WorkSpec{Workload: workv1alpha1.WorkloadTemplate{Manifests: []workv1alpha1.Manifest{{
+			RawExtension: runtime.RawExtension{Raw: []byte(`{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"deploy","namespace":"default"}}`)},
+		}}}},
+		Status: workv1alpha1.WorkStatus{
+			Conditions: []metav1.Condition{{Type: workv1alpha1.WorkApplied, Status: metav1.ConditionTrue}},
+			ManifestStatuses: []workv1alpha1.ManifestStatus{{
+				Identifier: workv1alpha1.ResourceIdentifier{Group: "apps", Version: "v1", Kind: "Deployment", Name: "deploy", Namespace: "default"},
+				Health:     workv1alpha1.ResourceHealthy,
+			}},
+		},
+	}
 
-// setupScheme initializes a new scheme
+	first := true
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(setupScheme()).
+		WithIndex(&workv1alpha1.Work{}, indexregistry.WorkIndexByLabelResourceBindingID, indexregistry.GenLabelIndexerFunc(workv1alpha2.ResourceBindingPermanentIDLabel)).
+		WithObjects(binding, work).
+		WithStatusSubresource(binding, &workv1alpha1.Work{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceUpdate: func(ctx context.Context, c client.Client, _ string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+				if first {
+					first = false
+					w := &workv1alpha1.Work{}
+					if err := c.Get(ctx, client.ObjectKey{Namespace: "karmada-es-member1", Name: "work-1"}, w); err != nil {
+						return err
+					}
+					w.Status.ManifestStatuses[0].Health = workv1alpha1.ResourceUnhealthy
+					if err := c.Status().Update(ctx, w); err != nil {
+						return err
+					}
+					return apierrors.NewConflict(schema.GroupResource{}, obj.GetName(), nil)
+				}
+				return c.Status().Update(ctx, obj, opts...)
+			},
+		}).Build()
+
+	assert.NoError(t, AggregateResourceBindingWorkStatus(context.TODO(), fakeClient, binding, record.NewFakeRecorder(1)))
+
+	got := &workv1alpha2.ResourceBinding{}
+	assert.NoError(t, fakeClient.Get(context.TODO(), client.ObjectKey{Namespace: "default", Name: "rb"}, got))
+	assert.Equal(t, workv1alpha2.ResourceUnhealthy, got.Status.AggregatedStatus[0].Health)
+}
+
 func setupScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	_ = workv1alpha1.Install(scheme)
