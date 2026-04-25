@@ -135,7 +135,7 @@ func TestDistinguishUnhealthyClustersWithOthers(t *testing.T) {
 			},
 			resourceBindingSpec: workv1alpha2.ResourceBindingSpec{},
 			expectedClusters:    nil,
-			expectedOthers:      []string{"member1", "member2"},
+			expectedOthers:      nil,
 		},
 		{
 			name: "one application is unhealthy and not in gracefulEvictionTasks",

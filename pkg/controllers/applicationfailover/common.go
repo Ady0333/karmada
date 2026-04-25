@@ -116,7 +116,7 @@ func distinguishUnhealthyClustersWithOthers(aggregatedStatusItems []workv1alpha2
 			unhealthyClusters = append(unhealthyClusters, cluster)
 		}
 
-		if aggregatedStatusItem.Health == workv1alpha2.ResourceHealthy || aggregatedStatusItem.Health == workv1alpha2.ResourceUnknown {
+		if aggregatedStatusItem.Health == workv1alpha2.ResourceHealthy {
 			others = append(others, cluster)
 		}
 	}
