@@ -106,9 +106,11 @@ func (m *workloadUnhealthyMap) deleteIrrelevantClusters(key types.NamespacedName
 	m.workloadUnhealthy[key] = unhealthyClusters
 }
 
-// distinguishUnhealthyClustersWithOthers distinguishes clusters which is in the unHealthy state(not in the process of eviction) with others.
+// distinguishUnhealthyClustersWithOthers distinguishes unhealthy clusters (not in the process of eviction) from healthy ones.
+// ResourceUnknown clusters are intentionally excluded from both lists to preserve their failover timers across transient
+// status collection gaps.
 func distinguishUnhealthyClustersWithOthers(aggregatedStatusItems []workv1alpha2.AggregatedStatusItem, resourceBindingSpec workv1alpha2.ResourceBindingSpec) ([]string, []string) {
-	var unhealthyClusters, others []string
+	var unhealthyClusters, healthyClusters []string
 	for _, aggregatedStatusItem := range aggregatedStatusItems {
 		cluster := aggregatedStatusItem.ClusterName
 
@@ -117,11 +119,11 @@ func distinguishUnhealthyClustersWithOthers(aggregatedStatusItems []workv1alpha2
 		}
 
 		if aggregatedStatusItem.Health == workv1alpha2.ResourceHealthy {
-			others = append(others, cluster)
+			healthyClusters = append(healthyClusters, cluster)
 		}
 	}
 
-	return unhealthyClusters, others
+	return unhealthyClusters, healthyClusters
 }
 
 func getClusterNamesFromTargetClusters(targetClusters []workv1alpha2.TargetCluster) []string {
