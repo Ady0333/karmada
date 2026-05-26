@@ -269,20 +269,21 @@ func (c *ClusterStatusController) setCurrentClusterStatus(clusterClient *util.Cl
 			// if clusterInformerManager fails to be built, should be returned, otherwise, it may cause a nil pointer
 			return nil, err
 		}
-		nodes, err := listNodes(clusterInformerManager)
-		if err != nil {
-			klog.ErrorS(err, "Failed to list nodes for Cluster", "cluster", cluster.GetName())
+		nodes, nodesErr := listNodes(clusterInformerManager)
+		if nodesErr != nil {
+			klog.ErrorS(nodesErr, "Failed to list nodes, preserving previous summaries for cluster", "cluster", cluster.GetName())
 		}
-
-		pods, err := listPods(clusterInformerManager)
-		if err != nil {
-			klog.ErrorS(err, "Failed to list pods for Cluster", "cluster", cluster.GetName())
+		pods, podsErr := listPods(clusterInformerManager)
+		if podsErr != nil {
+			klog.ErrorS(podsErr, "Failed to list pods, preserving previous summaries for cluster", "cluster", cluster.GetName())
 		}
-		currentClusterStatus.NodeSummary = getNodeSummary(nodes)
-		currentClusterStatus.ResourceSummary = getResourceSummary(nodes, pods)
+		if nodesErr == nil && podsErr == nil && nodes != nil && pods != nil {
+			currentClusterStatus.NodeSummary = getNodeSummary(nodes)
+			currentClusterStatus.ResourceSummary = getResourceSummary(nodes, pods)
 
-		if features.FeatureGate.Enabled(features.CustomizedClusterResourceModeling) {
-			currentClusterStatus.ResourceSummary.AllocatableModelings = getAllocatableModelings(cluster, nodes, pods)
+			if features.FeatureGate.Enabled(features.CustomizedClusterResourceModeling) {
+				currentClusterStatus.ResourceSummary.AllocatableModelings = getAllocatableModelings(cluster, nodes, pods)
+			}
 		}
 	}
 	return conditions, nil
